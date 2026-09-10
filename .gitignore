@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.DS_Store
+.claude/
+
+# Downloaded/generated model weights -- not project code, too large for git
+# (blip_finetuned/model.safetensors alone is ~1.4GB, over GitHub's 100MB limit)
+blip_finetuned/
+vosk-model-small-en-us/
+yolov8n.pt
