@@ -3,6 +3,7 @@ import pyttsx3
 import threading
 import queue
 import json
+import os
 import numpy as np
 import sounddevice as sd
 import whisper
@@ -24,9 +25,11 @@ VQA_DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
 # float16 halves the model's memory footprint; MPS supports it well, plain
 # CPU inference does not, so only use it when running on the GPU.
 VQA_DTYPE = torch.float16 if VQA_DEVICE == "mps" else torch.float32
-# Fine-tuned on a VizWiz subset (see PROJECT_STATUS.md Phase 7) instead of
-# the stock Salesforce/blip-vqa-base checkpoint.
-VQA_MODEL_PATH = "blip_finetuned"
+# Fine-tuned on a VizWiz subset (see PROJECT_STATUS.md Phase 7). Falls back
+# to the stock model if the fine-tuned checkpoint isn't present locally --
+# it's too large for git, so anyone cloning the repo without it still gets
+# a working app.
+VQA_MODEL_PATH = "blip_finetuned" if os.path.isdir("blip_finetuned") else "Salesforce/blip-vqa-base"
 vqa_processor = BlipProcessor.from_pretrained(VQA_MODEL_PATH)
 vqa_model = BlipForQuestionAnswering.from_pretrained(
     VQA_MODEL_PATH, torch_dtype=VQA_DTYPE

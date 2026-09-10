@@ -3,6 +3,7 @@ import time
 import json
 import threading
 import queue
+import os
 import numpy as np
 import sounddevice as sd
 import whisper
@@ -18,7 +19,7 @@ whisper_model = whisper.load_model("tiny")
 print("Loading VQA model...")
 VQA_DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
 VQA_DTYPE = torch.float16 if VQA_DEVICE == "mps" else torch.float32
-VQA_MODEL_PATH = "blip_finetuned"
+VQA_MODEL_PATH = "blip_finetuned" if os.path.isdir("blip_finetuned") else "Salesforce/blip-vqa-base"
 vqa_processor = BlipProcessor.from_pretrained(VQA_MODEL_PATH)
 vqa_model = BlipForQuestionAnswering.from_pretrained(
     VQA_MODEL_PATH, torch_dtype=VQA_DTYPE

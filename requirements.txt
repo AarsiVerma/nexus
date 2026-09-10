@@ -1,0 +1,10 @@
+opencv-python
+pyttsx3
+numpy
+sounddevice
+openai-whisper
+torch
+Pillow
+transformers
+vosk
+ultralytics
