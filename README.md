@@ -52,4 +52,22 @@ about whatever the camera sees. See `PROJECT_STATUS.md` and
 Python 3.12, a webcam, and a microphone. Developed and tested on macOS
 (Apple Silicon); should also run on other platforms, though the
 `torch.backends.mps` GPU acceleration only applies on Apple Silicon --
-elsewhere it automatically falls back to CPU.
+elsewhere it automatically falls back to CPU. Your OS will likely prompt
+for camera and microphone permission the first time you run it -- allow
+both, or the app can't work.
+
+## Using the fine-tuned model instead of the stock one
+
+If you were sent a `blip_finetuned` folder (or a zip of it), unzip it if
+needed, then place the folder -- named exactly `blip_finetuned` -- directly
+in this project directory, next to `vision_saathi.py`. No code changes
+needed; it's detected and used automatically if present.
+
+## Troubleshooting
+
+- **No sound at all**: check your system volume isn't muted, and try
+  `say "test"` (macOS) in a plain terminal to confirm your OS's
+  text-to-speech works at all, independent of this app.
+- **Camera window is black or frozen**: check camera permission was
+  granted to your terminal app in your OS's privacy settings.
+- **"No module named X" error**: rerun `pip install -r requirements.txt`.
