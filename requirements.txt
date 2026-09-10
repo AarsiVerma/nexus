@@ -8,3 +8,5 @@ Pillow
 transformers
 vosk
 ultralytics
+ollama
+easyocr

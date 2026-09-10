@@ -3,13 +3,12 @@ import pyttsx3
 import threading
 import queue
 import json
-import os
+import re
 import numpy as np
 import sounddevice as sd
 import whisper
-import torch
-from PIL import Image
-from transformers import BlipProcessor, BlipForQuestionAnswering
+import ollama
+import easyocr
 from vosk import Model as VoskModel, KaldiRecognizer
 from ultralytics import YOLO
 import time
@@ -20,20 +19,27 @@ model = YOLO('yolov8n.pt')
 print("Loading Whisper model...")
 whisper_model = whisper.load_model("tiny")
 
-print("Loading VQA model...")
-VQA_DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
-# float16 halves the model's memory footprint; MPS supports it well, plain
-# CPU inference does not, so only use it when running on the GPU.
-VQA_DTYPE = torch.float16 if VQA_DEVICE == "mps" else torch.float32
-# Fine-tuned on a VizWiz subset (see PROJECT_STATUS.md Phase 7). Falls back
-# to the stock model if the fine-tuned checkpoint isn't present locally --
-# it's too large for git, so anyone cloning the repo without it still gets
-# a working app.
-VQA_MODEL_PATH = "blip_finetuned" if os.path.isdir("blip_finetuned") else "Salesforce/blip-vqa-base"
-vqa_processor = BlipProcessor.from_pretrained(VQA_MODEL_PATH)
-vqa_model = BlipForQuestionAnswering.from_pretrained(
-    VQA_MODEL_PATH, torch_dtype=VQA_DTYPE
-).to(VQA_DEVICE)
+print("Checking Ollama / VQA model...")
+# Answers questions via moondream2 (quantized, served locally by Ollama) instead
+# of BLIP-VQA -- gives full descriptive sentences instead of one-word answers.
+# Requires the Ollama background service running (`brew services start ollama`)
+# and the model pulled (`ollama pull moondream:v2`).
+VQA_MODEL = "moondream:v2"
+VQA_FRAME_PATH = "/tmp/vision_saathi_frame.jpg"
+try:
+    ollama.list()
+except Exception as e:
+    raise SystemExit(
+        "Can't reach the Ollama service. Run `brew services start ollama` "
+        f"(and make sure `ollama pull {VQA_MODEL}` has been run) before "
+        f"starting this app.\nOriginal error: {e}"
+    )
+
+print("Loading OCR reader (first run downloads ~100-200MB)...")
+# moondream isn't a dedicated OCR tool and can't reliably transcribe printed
+# text (labels, signs, currency) -- EasyOCR handles that instead, including
+# Hindi alongside English, since that's a stated goal for Indian-context use.
+ocr_reader = easyocr.Reader(['en', 'hi'])
 
 latest_frame = None  # updated every main-loop iteration, read by the wake-word handler
 
@@ -57,6 +63,33 @@ ALERT_OBJECTS = {
     'dog': 'Dog nearby',
     'cat': 'Cat nearby',
 }
+
+# Maps words a user might actually say to the YOLO label that counts them.
+# Counting questions are answered by counting YOLO's own detections instead
+# of asking moondream to state a number in words -- moondream silently fails
+# on counting questions (confirmed by testing), while YOLO already tracks
+# exactly these object instances every second for the alert system above.
+COUNTABLE_OBJECTS = {
+    'person': 'person', 'people': 'person', 'persons': 'person',
+    'bottle': 'bottle', 'bottles': 'bottle',
+    'cup': 'cup', 'cups': 'cup',
+    'chair': 'chair', 'chairs': 'chair',
+    'laptop': 'laptop', 'laptops': 'laptop',
+    'phone': 'cell phone', 'phones': 'cell phone', 'cellphone': 'cell phone',
+    'book': 'book', 'books': 'book',
+    'car': 'car', 'cars': 'car',
+    'motorcycle': 'motorcycle', 'motorcycles': 'motorcycle',
+    'bicycle': 'bicycle', 'bicycles': 'bicycle', 'bike': 'bicycle', 'bikes': 'bicycle',
+    'dog': 'dog', 'dogs': 'dog',
+    'cat': 'cat', 'cats': 'cat',
+    'table': 'dining table', 'tables': 'dining table',
+    'door': 'door', 'doors': 'door',
+}
+
+# Phrases that mean "read this out loud" rather than "describe/answer" --
+# routed to OCR instead of moondream, since a general vision-language model
+# isn't reliable at precisely transcribing printed text.
+READ_TRIGGERS = ('read', 'says', 'written', 'say', 'text on', 'label say')
 
 AUTO_ALERTS_ENABLED = False  # set True to re-enable automatic "Person ahead" style alerts
 
@@ -178,41 +211,78 @@ def record_question():
     return audio.astype(np.float32) / 32768.0  # Whisper expects float32 in [-1, 1]
 
 
-def phrase_answer(question, raw_answer):
-    # BLIP VQA always returns a short factual answer (e.g. "phone", "blue"),
-    # never a full sentence -- this wraps it to sound like a natural spoken
-    # response instead of a flat template repeated every time.
-    q = question.lower().strip()
-    answer = raw_answer.strip()
+def make_descriptive_prompt(question):
+    # moondream2 (via Ollama) silently returns an empty answer for short,
+    # direct questions ("How many people are there?") but answers well when
+    # the same question is framed descriptively -- confirmed by testing, see
+    # PROJECT_STATUS.md. Wrapping every question this way avoids depending on
+    # how the user happens to phrase things out loud. The "one or two
+    # sentences, stay focused" instruction curbs a separate tendency to
+    # ramble into unrelated scene details instead of answering what was
+    # actually asked.
+    q = question.strip()
+    if not q.endswith(('.', '?', '!')):
+        q += '?'
+    return (
+        "Looking at this image, answer this question in one or two short "
+        f"sentences, staying focused only on what was asked: {q}"
+    )
 
-    if q.startswith(("how many", "count")):
-        return f"There are {answer} of them."
-    if q.startswith("what color") or "colour" in q:
-        return f"It looks {answer} in color."
-    if q.startswith(("where", "where's", "where is")):
-        return f"It looks like it's {answer}."
-    if q.startswith(("who", "who's", "who is")):
-        return f"That looks like {answer}."
-    if q.startswith(("is ", "are ", "can ", "do ", "does ", "did ", "was ", "were ")):
-        if answer == "yes":
-            return "Yes, that's right."
-        if answer == "no":
-            return "No, it isn't."
-        return f"{answer.capitalize()}."
-    if q.startswith(("what is", "what's", "what are", "what does")):
-        return f"That looks like {answer}."
-    return f"It looks like {answer}."
+
+def read_text_aloud():
+    # confidence > 0.4 filters out low-confidence noise/garbage detections,
+    # not genuine but faint text
+    results = ocr_reader.readtext(latest_frame)
+    texts = [text for (_, text, confidence) in results if confidence > 0.4]
+    if not texts:
+        return "I couldn't find any readable text there."
+    return "It says: " + ", ".join(texts)
+
+
+def count_known_objects(question):
+    words = re.findall(r"[a-z']+", question.lower())
+    for word in words:
+        if word in COUNTABLE_OBJECTS:
+            label = COUNTABLE_OBJECTS[word]
+            count = sum(1 for box in last_boxes if box[4] == label)
+            if count == 0:
+                return f"I don't see any {word} right now."
+            return f"I can see {count} {word} right now."
+    return None  # not a recognized/countable object -- caller falls back to moondream
 
 
 def answer_question(question):
     if latest_frame is None:
         return "I can't see anything right now."
 
-    image = Image.fromarray(cv2.cvtColor(latest_frame, cv2.COLOR_BGR2RGB))
-    inputs = vqa_processor(image, question, return_tensors="pt").to(VQA_DEVICE, VQA_DTYPE)
-    out = vqa_model.generate(**inputs, max_new_tokens=30)
-    raw_answer = vqa_processor.decode(out[0], skip_special_tokens=True)
-    return phrase_answer(question, raw_answer)
+    q = question.lower()
+
+    if any(trigger in q for trigger in READ_TRIGGERS):
+        return read_text_aloud()
+
+    if q.startswith(("how many", "count")):
+        count_answer = count_known_objects(q)
+        if count_answer is not None:
+            return count_answer
+        # not a YOLO-tracked object -- fall through to moondream below,
+        # which can still attempt a general descriptive answer
+
+    cv2.imwrite(VQA_FRAME_PATH, latest_frame)
+    response = ollama.chat(
+        model=VQA_MODEL,
+        messages=[{
+            "role": "user",
+            "content": make_descriptive_prompt(question),
+            "images": [VQA_FRAME_PATH],
+        }],
+        # Hard cap as a safety net -- keeps answers short even if the model
+        # doesn't fully follow the "one or two sentences" instruction above.
+        options={"num_predict": 60},
+    )
+    answer = response["message"]["content"].strip()
+    if not answer:
+        return "I'm not too sure about that one -- could you ask it a different way?"
+    return answer
 
 
 def wake_word_handler():
@@ -240,6 +310,12 @@ def wake_word_handler():
             qa_active.clear()
 
 
+# Defined before the wake-word threads start so count_known_objects() always
+# has something to read, even if the wake word fires before the first
+# detection pass below completes.
+last_detect_time = 0
+last_boxes = []  # persisted detections drawn between YOLO runs
+
 threading.Thread(target=wake_word_listener, daemon=True).start()
 threading.Thread(target=wake_word_handler, daemon=True).start()
 
@@ -250,9 +326,6 @@ cap.set(cv2.CAP_PROP_FRAME_WIDTH, 960)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
 print("VisionSaathi is running... Press Q to quit.")
 speak("VisionSaathi is ready")
-
-last_detect_time = 0
-last_boxes = []  # persisted detections drawn between YOLO runs
 
 while True:
     ret, frame = cap.read()
