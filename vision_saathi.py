@@ -1,5 +1,5 @@
 import cv2
-import pyttsx3
+import subprocess
 import threading
 import queue
 import json
@@ -103,26 +103,39 @@ CONFIRM_FRAMES = 2  # require this many consecutive detections before alerting, 
 qa_active = threading.Event()  # set while a wake-word question is being recorded/answered
 
 
-# pyttsx3's macOS speech driver isn't safe to call from multiple threads at
-# once (it fatally crashes the whole process, not just the thread), so all
-# speech goes through one queue and one worker thread.
+# pyttsx3 was dropped: its macOS driver could report success (no exception,
+# "finished OK") while producing no audible sound at all, confirmed by
+# testing -- a silent failure mode with nothing for us to catch or detect.
+# macOS's own `say` command is what we already confirmed works reliably
+# (used early on to debug system audio), so speech goes through that
+# instead via subprocess -- still serialized through one queue/worker so
+# utterances don't overlap.
 speech_queue = queue.Queue()
 
 def _tts_worker():
-    # pyttsx3's macOS driver must be initialized and driven from the same
-    # thread throughout its life, or speech silently no-ops (no error, no
-    # sound) — so the engine is created here, not on the main thread.
-    engine = pyttsx3.init()
-    engine.setProperty('rate', 150)
     while True:
         text = speech_queue.get()
-        engine.say(text)
-        engine.runAndWait()
+        print(f"[TTS] starting: {text[:60]!r}...", flush=True)
+        try:
+            subprocess.run(["say", text], check=True)
+            print("[TTS] finished OK", flush=True)
+        except Exception as e:
+            print(f"TTS error (skipped): {e}", flush=True)
+        finally:
+            speech_queue.task_done()
 
 threading.Thread(target=_tts_worker, daemon=True).start()
 
 def speak(text):
     speech_queue.put(text)
+
+def speak_and_wait(text):
+    # Blocks until this text (and anything already queued before it) has
+    # actually finished being spoken. Used before recording a question, so
+    # the mic doesn't start capturing while "I'm listening" is still playing
+    # through the speaker and bleeding into the recording.
+    speak(text)
+    speech_queue.join()
 
 def should_alert(label):
     now = time.time()
@@ -130,6 +143,37 @@ def should_alert(label):
         last_spoken[label] = now
         return True
     return False
+
+
+# --- Shared microphone stream ---------------------------------------------
+# Originally, the wake-word listener kept one mic stream open for the whole
+# session while record_question() opened and closed a brand new separate
+# stream every single time a question was recorded. Confirmed by testing:
+# after enough of those open/close cycles, the long-running wake-word stream
+# would silently stop receiving audio at all (no crash, no error -- "Hey
+# Nexus" just stopped working partway into a session). Two concurrent
+# streams to the same mic device apparently isn't reliable over time on this
+# hardware. Fix: one persistent stream for the entire app, shared by both
+# consumers via two separate queues fed from the same callback.
+AUDIO_SAMPLE_RATE = 16000
+
+wake_audio_queue = queue.Queue()
+question_audio_queue = queue.Queue()
+recording_active = threading.Event()  # only buffer into question_audio_queue while actually recording
+
+
+def _shared_audio_callback(indata, frames, time_info, status):
+    data = bytes(indata)
+    wake_audio_queue.put(data)
+    if recording_active.is_set():
+        question_audio_queue.put(data)
+
+
+_shared_audio_stream = sd.RawInputStream(
+    samplerate=AUDIO_SAMPLE_RATE, blocksize=8000, dtype='int16',
+    channels=1, callback=_shared_audio_callback,
+)
+_shared_audio_stream.start()
 
 
 # --- Wake word ("Hey Nexus") ---------------------------------------------
@@ -147,95 +191,111 @@ wake_word_detected = threading.Event()
 
 def wake_word_listener():
     vosk_model = VoskModel(WAKE_MODEL_PATH)
-    recognizer = KaldiRecognizer(vosk_model, 16000, json.dumps(WAKE_GRAMMAR))
-    audio_queue = queue.Queue()
-
-    def callback(indata, frames, time_info, status):
-        audio_queue.put(bytes(indata))
+    recognizer = KaldiRecognizer(vosk_model, AUDIO_SAMPLE_RATE, json.dumps(WAKE_GRAMMAR))
 
     last_trigger = 0
-    with sd.RawInputStream(samplerate=16000, blocksize=8000, dtype='int16',
-                            channels=1, callback=callback):
-        while True:
-            data = audio_queue.get()
-            heard = None
-            if recognizer.AcceptWaveform(data):
-                heard = json.loads(recognizer.Result()).get("text", "")
-            else:
-                partial = json.loads(recognizer.PartialResult()).get("partial", "")
-                if "nexus" in partial:
-                    heard = partial
-                    recognizer.Reset()
+    while True:
+        data = wake_audio_queue.get()
+        heard = None
+        if recognizer.AcceptWaveform(data):
+            heard = json.loads(recognizer.Result()).get("text", "")
+        else:
+            partial = json.loads(recognizer.PartialResult()).get("partial", "")
+            if "nexus" in partial:
+                heard = partial
+                recognizer.Reset()
 
-            if heard and "nexus" in heard and (time.time() - last_trigger) > WAKE_COOLDOWN:
-                last_trigger = time.time()
-                wake_word_detected.set()
+        if heard and "nexus" in heard and (time.time() - last_trigger) > WAKE_COOLDOWN:
+            last_trigger = time.time()
+            wake_word_detected.set()
 
 
-QUESTION_SAMPLE_RATE = 16000
 SILENCE_THRESHOLD = 500     # RMS amplitude below this counts as silence
 SILENCE_DURATION = 1.5      # stop after this many seconds of silence
 MAX_QUESTION_DURATION = 15  # hard cap so it never records forever
-CHUNK_DURATION = 0.25       # seconds per audio chunk read from the mic
 
 
 def record_question():
+    # Drop any stale audio that arrived while we weren't recording, so the
+    # first chunk we process is actually from now, not a backlog.
+    while not question_audio_queue.empty():
+        question_audio_queue.get_nowait()
+
+    recording_active.set()
     chunks = []
     silence_start = None
     start_time = time.time()
 
-    stream = sd.InputStream(samplerate=QUESTION_SAMPLE_RATE, channels=1, dtype='int16')
-    stream.start()
-
-    while True:
-        data, _ = stream.read(int(QUESTION_SAMPLE_RATE * CHUNK_DURATION))
-        chunks.append(data.copy())
-
-        rms = np.sqrt(np.mean(data.astype(np.float32) ** 2))
-
-        if rms < SILENCE_THRESHOLD:
-            if silence_start is None:
-                silence_start = time.time()
-            elif time.time() - silence_start >= SILENCE_DURATION:
+    try:
+        while True:
+            try:
+                data = question_audio_queue.get(timeout=MAX_QUESTION_DURATION)
+            except queue.Empty:
                 break
-        else:
-            silence_start = None
+            chunk = np.frombuffer(data, dtype=np.int16).reshape(-1, 1)
+            chunks.append(chunk)
 
-        if time.time() - start_time > MAX_QUESTION_DURATION:
-            break
+            rms = np.sqrt(np.mean(chunk.astype(np.float32) ** 2))
 
-    stream.stop()
-    stream.close()
+            if rms < SILENCE_THRESHOLD:
+                if silence_start is None:
+                    silence_start = time.time()
+                elif time.time() - silence_start >= SILENCE_DURATION:
+                    break
+            else:
+                silence_start = None
+
+            if time.time() - start_time > MAX_QUESTION_DURATION:
+                break
+    finally:
+        recording_active.clear()
+
+    if not chunks:
+        return np.array([], dtype=np.float32)
 
     audio = np.concatenate(chunks, axis=0).flatten()
     return audio.astype(np.float32) / 32768.0  # Whisper expects float32 in [-1, 1]
 
 
+_question_counter = 0
+
+
 def make_descriptive_prompt(question):
-    # moondream2 (via Ollama) silently returns an empty answer for short,
-    # direct questions ("How many people are there?") but answers well when
-    # the same question is framed descriptively -- confirmed by testing, see
-    # PROJECT_STATUS.md. Wrapping every question this way avoids depending on
-    # how the user happens to phrase things out loud. The "one or two
-    # sentences, stay focused" instruction curbs a separate tendency to
-    # ramble into unrelated scene details instead of answering what was
-    # actually asked.
+    # Close-to-raw -- the very first, unconstrained test of this model gave
+    # the richest, most detailed answers of any version tried, and every
+    # instruction piled on after that (brevity, vocabulary, focus hints)
+    # made answers worse, confirmed by repeated testing.
+    #
+    # One exception, confirmed repeatedly across multiple test sessions:
+    # bare "What is in my hand?" reliably fails (defaults to describing a
+    # background object), while the *exact same question* phrased as a
+    # request -- "Can you tell/describe what is in my hand?" -- reliably
+    # succeeds. (A generic "please describe in detail:" prefix was tried
+    # first and did NOT fix it -- this specific "can you tell me" phrasing
+    # is what the logs actually show working, so use that instead of a
+    # guess.)
+    global _question_counter
+    _question_counter += 1
     q = question.strip()
     if not q.endswith(('.', '?', '!')):
         q += '?'
-    return (
-        "Looking at this image, answer this question in one or two short "
-        f"sentences, staying focused only on what was asked: {q}"
-    )
+    if not q.lower().startswith(('can you', 'could you', 'would you', 'please')):
+        q = f"Can you tell me {q[0].lower()}{q[1:]}"
+    return f"[Question #{_question_counter}] {q}"
 
 
 def read_text_aloud():
-    # confidence > 0.4 filters out low-confidence noise/garbage detections,
-    # not genuine but faint text
     results = ocr_reader.readtext(latest_frame)
-    texts = [text for (_, text, confidence) in results if confidence > 0.4]
-    if not texts:
+    # confidence > 0.25 filters out genuine noise/garbage while keeping more
+    # of the real but fainter/smaller text that 0.4 was dropping
+    kept = [(bbox, text) for (bbox, text, confidence) in results if confidence > 0.25]
+    if not kept:
         return "I couldn't find any readable text there."
+    # EasyOCR doesn't guarantee reading order -- sort top-to-bottom, then
+    # left-to-right (using each box's top-left corner) so a multi-line
+    # label comes out in the order a person would actually read it
+    kept.sort(key=lambda item: (item[0][0][1], item[0][0][0]))
+    texts = [text for (_, text) in kept]
     return "It says: " + ", ".join(texts)
 
 
@@ -275,9 +335,16 @@ def answer_question(question):
             "content": make_descriptive_prompt(question),
             "images": [VQA_FRAME_PATH],
         }],
-        # Hard cap as a safety net -- keeps answers short even if the model
-        # doesn't fully follow the "one or two sentences" instruction above.
-        options={"num_predict": 60},
+        # No brevity instruction or temperature override -- confirmed by
+        # testing that those made answers worse. num_predict here is purely
+        # a safety net, not a quality tweak: with greedy/deterministic
+        # decoding, a bad (e.g. garbled/foreign-language) prompt can trigger
+        # a genuine repetition loop with no randomness to break out of it,
+        # generating unbounded text that would otherwise get queued to
+        # speak in full. 200 tokens is well beyond any real answer seen in
+        # testing (normal rich answers run 3-4 sentences), so it shouldn't
+        # cut off legitimate responses.
+        options={"num_predict": 200},
     )
     answer = response["message"]["content"].strip()
     if not answer:
@@ -292,14 +359,23 @@ def wake_word_handler():
         qa_active.set()
         try:
             print("Wake word detected: Hey Nexus")
-            speak("I'm listening")
+            speak_and_wait("I'm listening")
 
             audio = record_question()
             result = whisper_model.transcribe(audio, language="en", fp16=False)
             question = result["text"].strip()
             print(f"Question heard: {question}")
 
-            if not question:
+            # Whisper occasionally hallucinates garbage on unclear/noisy
+            # audio -- including, confirmed by testing, other scripts
+            # (Korean) mixed with stray symbols. Sending that to the VQA
+            # model is worse than useless: it can trigger a genuine
+            # repetition-loop failure (deterministic decoding has no
+            # randomness to break out of one once started), producing a
+            # huge wall of repeated text that then gets queued to speak.
+            # This app only ever expects English, so reject anything with
+            # non-ASCII characters before it reaches the model at all.
+            if not question or not question.isascii():
                 speak("Sorry, I didn't catch that.")
                 continue
 
@@ -375,11 +451,8 @@ while True:
             if label not in seen_labels:
                 consecutive_hits[label] = 0
 
-    for x1, y1, x2, y2, label, confidence in last_boxes:
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 200, 100), 2)
-        cv2.putText(frame, f"{label} {confidence:.0%}",
-                   (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
-                   0.6, (0, 200, 100), 2)
+    # Detection boxes are no longer drawn on screen (not needed -- YOLO
+    # still runs every second for the counting feature, just not displayed).
 
     cv2.imshow('VisionSaathi', frame)
 
