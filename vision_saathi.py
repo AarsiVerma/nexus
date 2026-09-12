@@ -91,6 +91,16 @@ COUNTABLE_OBJECTS = {
 # isn't reliable at precisely transcribing printed text.
 READ_TRIGGERS = ('read', 'says', 'written', 'say', 'text on', 'label say')
 
+# Currency questions also route to OCR rather than moondream -- identifying
+# a note is fundamentally reading the denomination number printed on it
+# (in multiple spots, on every Indian note), not visually classifying it by
+# color/design, which a small general VLM isn't reliable at.
+CURRENCY_TRIGGERS = (
+    'how much money', 'how much is this', 'what note', 'which note',
+    'what currency', 'rupee', 'rupees',
+)
+INDIAN_DENOMINATIONS = {'10', '20', '50', '100', '200', '500', '2000'}
+
 AUTO_ALERTS_ENABLED = False  # set True to re-enable automatic "Person ahead" style alerts
 
 last_spoken = {}
@@ -299,6 +309,26 @@ def read_text_aloud():
     return "It says: " + ", ".join(texts)
 
 
+def identify_currency():
+    results = ocr_reader.readtext(latest_frame)
+    kept = [text for (_, text, confidence) in results if confidence > 0.25]
+    if not kept:
+        return "I couldn't find a currency note clearly in view."
+
+    # Indian notes print the denomination as a plain number in multiple
+    # spots -- look for OCR'd text that's just that number (allowing for
+    # stray OCR noise like a stray character stuck to a digit).
+    for text in kept:
+        digits = re.sub(r'[^0-9]', '', text)
+        if digits in INDIAN_DENOMINATIONS:
+            return f"This looks like a {digits} rupee note."
+
+    # Found text (probably bank name, promise-to-pay line, etc.) but no
+    # recognizable denomination number -- read what we did find rather than
+    # just failing silently.
+    return "I can see a note but couldn't clearly read the amount. It says: " + ", ".join(kept)
+
+
 def count_known_objects(question):
     words = re.findall(r"[a-z']+", question.lower())
     for word in words:
@@ -316,6 +346,9 @@ def answer_question(question):
         return "I can't see anything right now."
 
     q = question.lower()
+
+    if any(trigger in q for trigger in CURRENCY_TRIGGERS):
+        return identify_currency()
 
     if any(trigger in q for trigger in READ_TRIGGERS):
         return read_text_aloud()
