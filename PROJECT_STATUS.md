@@ -255,3 +255,69 @@ identification is the clearly weakest, least mature feature.
 - Larger, more systematic evaluation set; direct comparison against
   existing assistive tools on the same inputs.
 - Hindi voice input/output (currently text-only via OCR).
+
+## Team contribution table
+
+Equal split by ownership of a distinct, non-overlapping part of the actual
+codebase (not a precise effort audit) -- each person should study and be
+able to defend their own section, since a viva may ask individually.
+
+| Member | Area of Contribution | Key Deliverables | % |
+|---|---|---|---|
+| Member 1 | Perception & Counting | YOLO object detection integration, alert system, YOLO-based counting logic | 20% |
+| Member 2 | Voice Input Pipeline | Wake word detection (Vosk), speech-to-text (Whisper), microphone architecture & bug fixes | 20% |
+| Member 3 | Visual Question Answering (Core) | moondream2/Ollama integration, prompt engineering, model selection & debugging | 20% |
+| Member 4 | OCR & Currency Identification | Text reading (EasyOCR), Indian currency denomination detection | 20% |
+| Member 5 | TTS, System Integration & Evaluation | Speech output, intent-based routing architecture, evaluation harness & results, fine-tuning experiment | 20% |
+| **Total** | | | **100%** |
+
+## Study plan by member (what to read before the viva)
+
+**Member 1 — Perception & Counting**
+1. `vision_saathi.py`: the YOLO loading line, the main camera loop's
+   detection block (`model(small, verbose=False)`), `ALERT_OBJECTS`,
+   `COUNTABLE_OBJECTS`, `count_known_objects()`.
+2. Decisions #6 and #10 above, plus the "Camera + YOLO object detection"
+   and "YOLO-based counting" bullets under Build Status.
+3. Likely questions: How does YOLO detect objects? Why run detection once
+   a second instead of every frame? Why are alerts disabled by default?
+   Why does counting use YOLO instead of the language model? What happens
+   if asked to count something YOLO doesn't track?
+
+**Member 2 — Voice Input Pipeline**
+1. `vision_saathi.py`: `wake_word_listener()`, `record_question()`, the
+   shared audio stream block (`_shared_audio_callback`,
+   `_shared_audio_stream`), the non-ASCII check in `wake_word_handler()`.
+2. Decisions #1, #2, #3, #9, and the repetition-loop bullet under #5.
+3. Likely questions: Why "Nexus" not "Nexo"? Why Whisper "tiny"? What was
+   the microphone bug and how was it fixed? What happened when Whisper
+   mistranscribed audio, and how is that prevented now?
+
+**Member 3 — Visual Question Answering (Core)**
+1. `vision_saathi.py`: `make_descriptive_prompt()`, the `ollama.chat()`
+   call inside `answer_question()`.
+2. Decisions #4 and #5 in full -- the densest section, budget the most
+   study time here.
+3. Likely questions: Why not BLIP-2/LLaVA? What happened with moondream2
+   at full precision? How does Ollama solve that? What did you learn about
+   prompting this model? What's the caching bug and how did you find it?
+
+**Member 4 — OCR & Currency Identification**
+1. `vision_saathi.py`: `read_text_aloud()`, `identify_currency()`,
+   `READ_TRIGGERS`, `CURRENCY_TRIGGERS`, `INDIAN_DENOMINATIONS`.
+2. Decision #7 and the currency row in Evaluation Results.
+3. Likely questions: Why OCR instead of asking the vision model to read
+   text? How does currency identification actually work? What's the
+   false-positive bug you found, and why does it happen?
+
+**Member 5 — TTS, System Integration & Evaluation**
+1. `vision_saathi.py`: `_tts_worker()`, `speak()`/`speak_and_wait()`, and
+   the full if/elif routing chain in `answer_question()` (ties all 4 other
+   members' parts together -- worth understanding at a high level even
+   outside your own section).
+2. `eval_test.py`, decision #8, the Evaluation Results table, and the
+   Abandoned Approach note.
+3. Likely questions: Why drop pyttsx3? What's the overall system
+   architecture / how does a question get routed? How was the system
+   evaluated, and what did you find? What happened with the BLIP
+   fine-tuning experiment, and why isn't it used?
