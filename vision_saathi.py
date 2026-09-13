@@ -433,8 +433,8 @@ threading.Thread(target=wake_word_handler, daemon=True).start()
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 960)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
-print("VisionSaathi is running... Press Q to quit.")
-speak("VisionSaathi is ready")
+print("Nexus is running... Press Q to quit.")
+speak("Nexus is ready")
 
 while True:
     ret, frame = cap.read()
@@ -487,11 +487,11 @@ while True:
     # Detection boxes are no longer drawn on screen (not needed -- YOLO
     # still runs every second for the counting feature, just not displayed).
 
-    cv2.imshow('VisionSaathi', frame)
+    cv2.imshow('Nexus', frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
 cap.release()
 cv2.destroyAllWindows()
-print("VisionSaathi stopped.")
+print("Nexus stopped.")

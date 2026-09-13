@@ -2,6 +2,18 @@
 
 Full Project Documentation | ML Research Project
 
+> **Historical document — not the current project state.** This is the
+> original project proposal, pasted at the very start of development under
+> the name "DrishtiAI." The project was later renamed **Nexus** (via an
+> intermediate name, "VisionSaathi") and the actual implementation diverged
+> from this plan in several real ways -- most notably, the vision-language
+> model used is **moondream2 (via Ollama)**, not BLIP-2/LLaVA, and OCR-based
+> text/currency reading and YOLO-based counting were added and were not
+> part of this original plan. **For the current, accurate project state,
+> see `PROJECT_STATUS.md` and `README.md` instead of this file.** This
+> document is kept for reference as the original research proposal, not as
+> a description of what was actually built.
+
 ## Project Overview
 
 - **Project Name:** DrishtiAI
