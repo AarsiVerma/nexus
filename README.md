@@ -5,9 +5,9 @@ continuously on a laptop webcam and microphone, listens for the wake word
 "Hey Nexus," and answers spoken questions about whatever the camera
 currently sees -- object identification, counting, reading printed text
 aloud, and identifying Indian currency notes. See `PROJECT_STATUS.md` for
-the full build history and key engineering decisions, and
-`DrishtiAI_Project_Documentation.md` for the original project proposal this
-was built from (see the note at the top of that file for naming history).
+the full build history, key engineering decisions, and the actual
+evaluation results -- that file is the accurate source of truth for what
+this project does and doesn't do.
 
 ## Setup (run these steps in order)
 
@@ -76,10 +76,12 @@ was built from (see the note at the top of that file for naming history).
 
 - `voice_vqa_test.py` -- same voice Q&A flow as the main app, but with the
   automatic object-detection alerts turned off, useful for testing just the
-  question-answering without interruptions. **Uses the older BLIP-VQA path,
-  not moondream2** -- see "About the fine-tuned BLIP model" below.
+  question-answering without interruptions. **Uses an older, abandoned
+  BLIP-VQA approach, not moondream2 -- not part of the presented project,
+  kept only as a dev artifact.**
 - `vqa_test.py` -- type a question instead of speaking it (no mic/wake-word
-  needed at all). **Also uses the older BLIP-VQA path.**
+  needed at all). **Also uses the abandoned BLIP-VQA approach, not part of
+  the presented project.**
 - `wake_word.py` -- standalone wake-word detection test, isolated from
   everything else.
 - `question_recorder.py` -- standalone Whisper transcription test, isolated
@@ -102,18 +104,16 @@ permission the first time you run it -- allow both, or the app can't work.
 **This currently runs on a laptop only, not a phone** -- see Limitations in
 `PROJECT_STATUS.md`.
 
-## About the fine-tuned BLIP model (research history)
+## Note on an abandoned approach
 
-An earlier version of this app answered questions with a BLIP-VQA model
-fine-tuned on a VizWiz subset (see `PROJECT_STATUS.md` for the methodology
-and measured accuracy improvement: 22.6% baseline -> 25.2% fine-tuned on a
-500-question held-out set). That experiment is real, completed work and
-its result stands, but it is **not what the live app runs today** -- it was
-replaced with moondream2 (via Ollama) because BLIP-VQA can only produce
-short, one-word answers by design, no matter how it's fine-tuned, whereas
-moondream2 gives full descriptive sentences. `vqa_test.py` and
-`voice_vqa_test.py` still use the BLIP/`transformers` path if anyone wants
-to compare the two approaches directly.
+Early development fine-tuned a BLIP-VQA model instead of using moondream2.
+**This was abandoned and is not part of the project being presented** --
+mentioned here only so it's not a surprise if you see BLIP-related code in
+`vqa_test.py`/`voice_vqa_test.py` or in the git history. It was dropped
+because BLIP-VQA only produces short, one-word answers by design, which
+doesn't fit an assistant meant to describe scenes in detail. See
+`PROJECT_STATUS.md` if you need the specifics of why it was tried and why
+it was dropped.
 
 ## Troubleshooting
 

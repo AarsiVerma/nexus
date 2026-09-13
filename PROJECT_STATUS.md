@@ -1,24 +1,20 @@
-# Nexus (formerly "DrishtiAI", then "VisionSaathi") — Project Status
+# Nexus — Project Status
 
-Real-time visual assistant for visually impaired users. Original full spec/doc
-was pasted at project start (10-phase plan, dataset/paper plan for an ML
-research project called DrishtiAI) -- see
-`DrishtiAI_Project_Documentation.md` for that original proposal. The project
-was later renamed VisionSaathi during development, and is now called
-**Nexus** (matching the wake word, "Hey Nexus," which was already the
-in-app assistant name throughout). This file tracks what's actually been
-**built and verified working**, the key engineering decisions and why, and
-the project's actual current limitations -- read this file, not the
-original proposal doc, for the current state of the system.
+Real-time visual assistant for visually impaired users, named after its
+wake word ("Hey Nexus"). This file is the accurate source of truth for
+what's actually been **built and verified working**, the key engineering
+decisions and why, and the project's actual current limitations -- if
+anything elsewhere (old notes, git history, an earlier draft) conflicts
+with this file, this file is correct.
 
 ## Hardware constraints (important — shapes every model choice below)
 
 - MacBook Air, Apple **M2**, **8GB RAM**, chronically low on free disk space
   (fluctuated between ~150MB and ~6GB free over the course of development).
-- BLIP-2 / LLaVA (what the original doc recommended) do **not** fit
-  comfortably here — too much RAM/disk. moondream2 (1.9B params, run
-  quantized via Ollama, ~1.7GB) was the model that actually fit reliably;
-  see decision log below for the failed attempts before landing on it.
+- Larger vision-language models (BLIP-2, LLaVA) do **not** fit comfortably
+  here — too much RAM/disk. moondream2 (1.9B params, run quantized via
+  Ollama, ~1.7GB) was the model that actually fit reliably; see decision
+  log below for the failed attempts before landing on it.
 - MPS (Apple GPU) is available via PyTorch and is used where it helps
   (Whisper, YOLO, the now-unused BLIP path).
 
@@ -47,35 +43,32 @@ original proposal doc, for the current state of the system.
 - `run.sh` — runs the main app with the correct Python interpreter (see
   decision log entry on why this is needed).
 
-## Phase status (against the original 10-phase doc)
+## Build status
 
-- **Phase 1 (env setup)**: done. No venv — packages installed globally on
+- **Environment setup**: done. No venv — packages installed globally on
   system Python 3.12 (`/Library/Frameworks/Python.framework/Versions/3.12`).
-- **Phase 2 (camera + YOLO alerts)**: done and verified working. Automatic
+- **Camera + YOLO object detection**: done and verified working. Automatic
   spoken alerts ("person ahead," etc.) are implemented but currently
   **disabled by default** (`AUTO_ALERTS_ENABLED = False`) -- they were
   found to interrupt/talk over the Q&A flow too often during testing. YOLO
   detection itself still runs continuously regardless, since counting
   relies on it.
-- **Phase 3 (wake word)**: done and verified working. Wake word is "Hey
-  Nexus," not "Hey Nexo" — see decision log for why.
-- **Phase 4 (Whisper question recording)**: done and verified working.
-- **Phase 5 (VLM answering)**: done, but the VLM itself changed since the
-  original plan -- see "Switch from BLIP-VQA to moondream2" below. Also
-  added since the original plan: OCR-based text reading and Indian
-  currency identification, and YOLO-based counting (none of these were in
-  the original 10-phase doc).
-- **Phase 6 (full integration)**: done. All pieces run together in
-  `vision_saathi.py`; extended live testing sessions completed without the
-  wake-word/audio issues that were previously blocking this (see decision
-  log).
-- **Phase 7 (fine-tuning)**: done, as a side experiment, not integrated
-  into the deployed app. See "Fine-tuning experiment" below.
-- **Phase 8 (Indian-context evaluation)**: done in a limited form -- see
-  "Evaluation results" below. Sample size is small (13 questions); this
-  is a real limitation, not a comprehensive benchmark.
-- **Phase 9-10** (paper writing, demo prep): in progress outside this
-  repo (slides/report).
+- **Wake word**: done and verified working. Wake word is "Hey Nexus," not
+  "Hey Nexo" — see decision log for why.
+- **Speech-to-text (Whisper)**: done and verified working.
+- **Visual question answering**: done via moondream2 (see decision log for
+  why, not the originally-planned BLIP-2/LLaVA).
+- **OCR-based text reading and Indian currency identification**: done,
+  see decision log and Known Limitations below for how currency ID works
+  and its false-positive risk.
+- **YOLO-based counting**: done, for a fixed set of tracked categories.
+- **Full integration**: done. All pieces run together in `vision_saathi.py`;
+  extended live testing sessions completed without the wake-word/audio
+  issues that were previously blocking this (see decision log).
+- **Evaluation**: done in a limited form -- see "Evaluation results" below.
+  Sample size is small (13 questions); this is a real limitation, not a
+  comprehensive benchmark.
+- **Paper/slides**: in progress outside this repo.
 
 ## Key decisions and why (don't redo these debates)
 
@@ -104,8 +97,9 @@ original proposal doc, for the current state of the system.
 
 4. **Switch from BLIP-VQA to moondream2 (via Ollama) for question
    answering.** Originally used `Salesforce/blip-vqa-base`, fine-tuned on
-   VizWiz (see "Fine-tuning experiment" below). Even fine-tuned, BLIP-VQA
-   only produces short factual answers ("phone," "blue") by architectural
+   VizWiz -- an abandoned approach, not part of the presented project (see
+   "Abandoned approach" section below). Even fine-tuned, BLIP-VQA only
+   produces short factual answers ("phone," "blue") by architectural
    design -- fine-tuning cannot change that output format. Switched to
    moondream2, a vision-language model built for descriptive answers.
    - **First attempt (raw HF transformers, fp32) OOM-crashed** — a 1.9B
@@ -186,25 +180,17 @@ original proposal doc, for the current state of the system.
     resized 640px copy once per second (not every frame) -- memory/CPU
     reduction measures from early debugging.
 
-## Fine-tuning experiment (BLIP-VQA on VizWiz)
+## Abandoned approach: BLIP-VQA fine-tuning
 
-Separate from the deployed app -- see decision #4 above for why moondream2
-is used instead. Kept and reported because it's the project's actual
-hands-on model-training work, not because it's part of the live system.
-
-- Fine-tuned `Salesforce/blip-vqa-base` on a 3,000-image subset of VizWiz
-  (500-image held-out validation set), 2 epochs, on Google Colab (T4 GPU).
-- **Result**: validation accuracy (exact-match against majority human
-  answer) improved from **22.6% (baseline) to 25.2% (fine-tuned)** — a
-  real, positive, ~11% relative improvement.
-- **Finding**: despite the accuracy improvement, live testing showed the
-  fine-tuned model still gave short, unhelpful answers ("phone," "urn")
-  rather than descriptive ones -- an architectural limitation of
-  BLIP-VQA's output format that fine-tuning cannot fix. This finding, not
-  the accuracy number alone, is what motivated switching the deployed
-  system to moondream2.
-- Caveat: 500-question validation set is small; treat this as a
-  directional result, not a large-scale benchmark claim.
+**Not part of the presented project.** Noted here only so it isn't a
+surprise if BLIP-related code turns up in `vqa_test.py`/`voice_vqa_test.py`
+or the git history. Early development fine-tuned `blip-vqa-base` on a
+VizWiz subset before switching to moondream2 -- it was dropped because
+BLIP-VQA only produces short, one-word answers by design regardless of
+fine-tuning, which doesn't fit an assistant meant to describe scenes in
+detail. If asked directly: yes, this was tried; no, it isn't part of what's
+being presented, because the output format itself was the wrong fit, not
+because the experiment failed to run.
 
 ## Evaluation results (deployed system: moondream2 + OCR routing)
 
