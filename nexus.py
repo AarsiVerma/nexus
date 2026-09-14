@@ -1,9 +1,11 @@
 import cv2
-import subprocess
+import pyttsx3
+#import subprocess
 import threading
 import queue
 import json
 import re
+import os
 import numpy as np
 import sounddevice as sd
 import whisper
@@ -12,6 +14,7 @@ import easyocr
 from vosk import Model as VoskModel, KaldiRecognizer
 from ultralytics import YOLO
 import time
+
 
 # Load YOLOv8 model (downloads automatically on first run)
 model = YOLO('yolov8n.pt')
@@ -25,14 +28,15 @@ print("Checking Ollama / VQA model...")
 # Requires the Ollama background service running (`brew services start ollama`)
 # and the model pulled (`ollama pull moondream:v2`).
 VQA_MODEL = "moondream:v2"
-VQA_FRAME_PATH = "/tmp/nexus_frame.jpg"
+VQA_FRAME_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nexus_frame.jpg")
 try:
     ollama.list()
 except Exception as e:
     raise SystemExit(
-        "Can't reach the Ollama service. Run `brew services start ollama` "
-        f"(and make sure `ollama pull {VQA_MODEL}` has been run) before "
-        f"starting this app.\nOriginal error: {e}"
+        "Can't reach the Ollama service. "
+        f"Make sure Ollama is running and that `ollama pull {VQA_MODEL}` "
+        f"has been completed before starting this app.\n"
+        f"Original error: {e}"
     )
 
 print("Loading OCR reader (first run downloads ~100-200MB)...")
@@ -145,37 +149,69 @@ CONFIRM_FRAMES = 2  # require this many consecutive detections before alerting, 
 qa_active = threading.Event()  # set while a wake-word question is being recorded/answered
 
 
-# pyttsx3 was dropped: its macOS driver could report success (no exception,
-# "finished OK") while producing no audible sound at all, confirmed by
-# testing -- a silent failure mode with nothing for us to catch or detect.
-# macOS's own `say` command is what we already confirmed works reliably
-# (used early on to debug system audio), so speech goes through that
-# instead via subprocess -- still serialized through one queue/worker so
-# utterances don't overlap.
+# --- Text to speech -------------------------------------------------------
+
+# --- Text to speech -------------------------------------------------------
+
 speech_queue = queue.Queue()
 
+
+def _speak_windows(text):
+    """Speak one message using a fresh Windows SAPI5 engine."""
+    engine = None
+
+    try:
+        print(f"[TTS] starting: {text[:60]!r}...", flush=True)
+
+        engine = pyttsx3.init("sapi5")
+        engine.setProperty("rate", 170)
+        engine.setProperty("volume", 1.0)
+
+        # Make sure the engine has a valid Windows voice.
+        voices = engine.getProperty("voices")
+
+        if voices:
+            engine.setProperty("voice", voices[0].id)
+
+        engine.say(text)
+        engine.runAndWait()
+
+        print("[TTS] finished OK", flush=True)
+
+    except Exception as e:
+        print(f"TTS error: {e}", flush=True)
+
+    finally:
+        if engine is not None:
+            try:
+                engine.stop()
+            except Exception:
+                pass
+
+        engine = None
+
+
 def _tts_worker():
+    print("[TTS] Windows SAPI5 worker started", flush=True)
+
     while True:
         text = speech_queue.get()
-        print(f"[TTS] starting: {text[:60]!r}...", flush=True)
+
         try:
-            subprocess.run(["say", text], check=True)
-            print("[TTS] finished OK", flush=True)
-        except Exception as e:
-            print(f"TTS error (skipped): {e}", flush=True)
+            _speak_windows(text)
         finally:
             speech_queue.task_done()
 
+
 threading.Thread(target=_tts_worker, daemon=True).start()
 
+
 def speak(text):
-    speech_queue.put(text)
+    if text:
+        speech_queue.put(str(text))
+
 
 def speak_and_wait(text):
-    # Blocks until this text (and anything already queued before it) has
-    # actually finished being spoken. Used before recording a question, so
-    # the mic doesn't start capturing while "I'm listening" is still playing
-    # through the speaker and bleeding into the recording.
     speak(text)
     speech_queue.join()
 
@@ -477,9 +513,13 @@ def wake_word_handler():
                 speak("Sorry, I didn't catch that.")
                 continue
 
-            answer = answer_question(question)
-            print(f"Answer: {answer}")
-            speak(answer)
+            try:
+                answer = answer_question(question)
+                print(f"Answer: {answer}")
+                speak(answer)
+            except Exception as e:
+                print(f"VQA error: {e}", flush=True)
+                speak("Sorry, I couldn't process that question.")
         finally:
             qa_active.clear()
 
