@@ -1,160 +1,475 @@
-# Nexus
+# Nexus — Real-Time Voice-Driven Visual Assistant
 
-Real-time voice-driven visual assistant for the visually impaired. Runs
-continuously on a laptop webcam and microphone, listens for the wake word
-"Hey Nexus," and answers spoken questions about whatever the camera
-currently sees -- object identification, counting, reading printed text
-aloud, and identifying Indian currency notes. See `PROJECT_STATUS.md` for
-the full build history, key engineering decisions, and the actual
-evaluation results -- that file is the accurate source of truth for what
-this project does and doesn't do.
+Nexus is a real-time AI-powered visual assistant designed to help visually impaired users understand their surroundings through **voice interaction, computer vision, OCR, and visual question answering**.
 
-## Setup (run these steps in order)
+The system combines object detection, speech recognition, OCR, currency recognition, and multimodal AI into a single hands-free assistant.
 
-**Windows and macOS supported** — Windows uses pyttsx3 with SAPI5 for TTS; macOS uses the built-in `say` command. Linux is untested but should work with a TTS backend.
+## Features
 
-1. **Install Python dependencies:**
-   ```
-   pip install -r requirements.txt
-   ```
+- **Wake-word activation** using Vosk
+- **Voice question recognition** using OpenAI Whisper
+- **Real-time object detection** using YOLOv8n
+- **Object counting**
+- **Printed text recognition** using EasyOCR
+- **Indian currency recognition**
+- **Visual question answering** using Ollama + Moondream
+- **Voice responses**
+  - Windows: SAPI5 through `pyttsx3`
+  - macOS: built-in `say`
+- **Real-time webcam processing**
+- Shared microphone architecture for reliable repeated interactions
+- Cross-platform support for **Windows and macOS**
 
-2. **Download the wake-word model** (not included in this repo, ~40MB):
-   - Go to https://alphacephei.com/vosk/models
-   - Download the **vosk-model-small-en-us** package
-   - Unzip it and place the resulting folder in this same directory, named
-     exactly `vosk-model-small-en-us` (so `vosk-model-small-en-us/` sits next
-     to `nexus.py`)
+---
 
-3. **Install and start Ollama** (runs the question-answering model locally):
-   ```
-   brew install ollama
-   brew services start ollama
-   ollama pull moondream:v2
-   ```
-   The pull is about 1.7GB, one-time only. Ollama needs to be running
-   (`brew services start ollama` sets it to start automatically going
-   forward) whenever you run the app.
+# System Architecture
 
-4. **`yolov8n.pt`** (YOLO object detection weights) downloads automatically
-   on first run, no action needed.
+```text
+                    ┌──────────────────┐
+                    │   Webcam Input   │
+                    └────────┬─────────┘
+                             │
+                             ▼
+                    ┌──────────────────┐
+                    │     YOLOv8n      │
+                    │ Object Detection │
+                    └────────┬─────────┘
+                             │
+                             │
+        ┌────────────────────┴────────────────────┐
+        │                                         │
+        ▼                                         ▼
+┌──────────────────┐                     ┌──────────────────┐
+│  Voice Input     │                     │ Current Frame    │
+│  Microphone      │                     │                  │
+└────────┬─────────┘                     └────────┬─────────┘
+         │                                        │
+         ▼                                        │
+┌──────────────────┐                              │
+│ Vosk Wake Word   │                              │
+│  "Hey Nexus"     │                              │
+└────────┬─────────┘                              │
+         │                                        │
+         ▼                                        │
+┌──────────────────┐                              │
+│     Whisper      │                              │
+│ Speech-to-Text   │                              │
+└────────┬─────────┘                              │
+         │                                        │
+         ▼                                        ▼
+┌─────────────────────────────────────────────────────────┐
+│                    Question Router                      │
+└───────────────┬───────────────┬───────────────┬─────────┘
+                │               │               │
+                ▼               ▼               ▼
+             OCR /          YOLO Count       Moondream
+           Currency           Objects        Visual Q&A
+                │               │               │
+                └───────────────┴───────────────┘
+                                │
+                                ▼
+                       ┌─────────────────┐
+                       │  Voice Response │
+                       │      TTS        │
+                       └─────────────────┘
+Technology Stack
+Component	Technology
+Object Detection	YOLOv8n
+Speech Recognition	OpenAI Whisper
+Wake Word	Vosk
+OCR	EasyOCR
+Visual Question Answering	Ollama + Moondream
+Text-to-Speech — Windows	pyttsx3 + SAPI5
+Text-to-Speech — macOS	macOS say
+Computer Vision	OpenCV
+Audio Input	SoundDevice
+Language	Python
 
-5. **Run it:**
-   ```
-   ./run.sh
-   ```
-   Say "Hey Nexus" to ask a question about what the camera sees. Press `Q`
-   in the camera window to quit.
 
-   (If installing Ollama via Homebrew pulled in its own Python and now
-   shadows your original one when you type plain `python3`, `run.sh` sidesteps
-   that by pointing directly at the correct interpreter -- see Troubleshooting
-   below if you'd rather run it manually.)
+Requirements
+Hardware
+- Computer with a webcam
+- Microphone
+- Speakers or headphones
+- Internet connection for initial model/package downloads
+A dedicated GPU is not required. The application can run using CPU, although model inference will be slower.
+Software
+Windows
+- Windows 10/11
+- Python 3.10+
+- Ollama
+- Git (recommended)
+macOS
+- macOS
+- Python 3.10+
+- Homebrew
+- Ollama
+- Git (recommended)
+Linux is currently untested and is not officially supported by this project.
 
-## What it can actually do (verified working, see PROJECT_STATUS.md for the evaluation)
+Installation
+1. Clone the Repository
+git clone https://github.com/AarsiVerma/nexus.git
+cd nexus
+Windows Setup
+2. Install Python
+Install Python 3.10 or newer.
+Verify the installation:
+python --version
+You should see something similar to:
+Python 3.x.x
+3. Install Ollama
+Install Ollama for Windows from the official Ollama website.
+After installation, verify:
+ollama --version
+Pull the Moondream vision model:
+ollama pull moondream:v2
+Verify that it is available:
+ollama list
+You should see:
+moondream:v2
+4. Install Python Dependencies
+From the Nexus project directory:
+pip install -r requirements.txt
+5. Download the Vosk Wake-Word Model
+Download:
+vosk-model-small-en-us
+Extract the model so that the project structure contains:
+nexus/
+├── vosk-model-small-en-us/
+├── nexus.py
+├── requirements.txt
+└── ...
+The folder name must match:
+vosk-model-small-en-us
+6. Run Nexus on Windows
+You can run Nexus directly:
+python nexus.py
+Or use the Windows launcher:
+.\run.bat
+When everything is initialized, you should see:
+Nexus is running... Press Q to quit.
+Nexus will announce that it is ready.
+macOS Setup
+2. Install Python
+Verify Python:
+python3 --version
+Python 3.10 or newer is recommended.
+3. Install Ollama
+Install Ollama using Homebrew:
+brew install ollama
+Start the Ollama service:
+brew services start ollama
+Pull the Moondream model:
+ollama pull moondream:v2
+Verify:
+ollama list
+4. Install Python Dependencies
+From the Nexus directory:
+pip3 install -r requirements.txt
+5. Download the Vosk Wake-Word Model
+Download and extract:
+vosk-model-small-en-us
+Place it in the project root:
+nexus/
+├── vosk-model-small-en-us/
+├── nexus.py
+├── requirements.txt
+└── ...
+6. Run Nexus on macOS
+Use the provided launcher:
+./run.sh
+If necessary:
+chmod +x run.sh
+Then:
+./run.sh
+You can also run the application directly with Python if your environment is configured correctly:
+python3 nexus.py
+Using Nexus
+Once Nexus is running:
+1. Activate Nexus
+Say:
+Hey Nexus
+Nexus responds:
+I'm listening
+2. Ask a question
+For example:
+What is this?
+or:
+What do you see?
+Nexus captures the current camera frame and uses the appropriate vision component to answer.
+Example Commands
+General Visual Question Answering
+Hey Nexus
 
-- **General visual questions** ("what do you see," "what's in front of me,"
-  "what am I holding") -- answered by moondream2, a vision-language model
-  run locally via Ollama, giving full descriptive sentences rather than
-  single-word labels.
-- **Counting** for a fixed set of object categories YOLO already tracks
-  (person, bottle, cup, chair, laptop, phone, book, car, motorcycle,
-  bicycle, dog, cat, table, door) -- answered from YOLO's own live object
-  detection counts, not by asking the language model to state a number.
-  Counting anything outside this list falls back to moondream2, which is
-  known to be unreliable at counting in general.
-- **Reading printed text aloud** ("read this," "what does it say") --
-  answered via EasyOCR (English + Hindi), not the vision-language model,
-  since a general VLM isn't reliable at precisely transcribing text.
-- **Indian currency identification** ("how much is this," "what note is
-  this") -- also OCR-based: accepts a denomination match (10/20/50/100/
-  200/500/2000) only when backed by more than a single bare number, to
-  avoid misreading an unrelated object as a note (originally confirmed by
-  testing: a sunscreen box's "SPF 50" was misidentified as a 50 rupee
-  note). It looks for any of three signals: the number printed more than
-  once (real notes print it in multiple spots), bank text ("RESERVE BANK
-  OF INDIA" / भारतीय रिज़र्व बैंक), or the amount spelled out in words in
-  Hindi or English (e.g. "पाँच सौ रुपये" / "FIVE HUNDRED RUPEES"). **Known
-  limitation**: still depends on OCR actually catching one of those
-  signals clearly in frame, and a contrived object carrying two matching
-  numbers or real bank-style text could still fool it.
+What is this?
+Moondream analyzes the current camera frame and provides a spoken description.
+Object Counting
+Hey Nexus
 
-## Other scripts
+How many bottles are there?
+Nexus uses the YOLO detections from the current scene to count supported objects.
+Reading Text
+Hey Nexus
 
-- `voice_vqa_test.py` -- same voice Q&A flow as the main app, but with the
-  automatic object-detection alerts turned off, useful for testing just the
-  question-answering without interruptions. **Uses an older, abandoned
-  BLIP-VQA approach, not moondream2 -- not part of the presented project,
-  kept only as a dev artifact.**
-- `vqa_test.py` -- type a question instead of speaking it (no mic/wake-word
-  needed at all). **Also uses the abandoned BLIP-VQA approach, not part of
-  the presented project.**
-- `wake_word.py` -- standalone wake-word detection test, isolated from
-  everything else.
-- `question_recorder.py` -- standalone Whisper transcription test, isolated
-  from everything else.
-- `diagnose_ollama_moondream.py` -- standalone test of the moondream2/Ollama
-  Q&A path alone (captures one webcam frame, asks it a fixed set of sample
-  questions, prints the answers), no mic/wake-word/camera-loop involved.
-- `eval_test.py` -- an evaluation harness for testing question routing
-  against saved photos instead of the live camera (no scored benchmark is
-  currently published from it -- see "Sample interactions" in
-  `PROJECT_STATUS.md` for real question/answer examples instead). Mirrors
-  `nexus.py`'s actual routing logic (kept in sync by hand, not imported,
-  since importing the main file would start its live camera loop) against
-  a saved test image
-  and a list of questions passed on the command line. Usage:
-  `python3 eval_test.py <image_path> "question 1" "question 2" ...`
+Read this.
+EasyOCR extracts visible printed text and reads it aloud.
+Currency Recognition
+Show an Indian currency note and ask:
+Hey Nexus
 
-## Requirements
+How much is this?
+Nexus uses OCR and currency-specific validation to identify the denomination.
+Main Components
+YOLOv8n
+YOLOv8n performs real-time object detection using the webcam feed.
+It is also used for object counting.
+The detection system maintains recent detections so that questions about objects can be answered without running a separate model inference for every voice question.
+Vosk
+Vosk continuously listens for the wake phrase:
+Hey Nexus
+The application uses a shared microphone stream so wake-word detection and question recording can operate without repeatedly opening separate audio streams.
+Whisper
+After the wake word is detected, Nexus records the user's question and sends the audio to Whisper for speech-to-text conversion.
+Example:
+User:
+"What is this?"
 
-**Windows (tested) and macOS (tested)** — Linux untested but should work
-with a TTS backend.
+Whisper:
+"What is this?"
+The resulting text is passed to the question router.
+EasyOCR
+EasyOCR is used for:
+- Printed text
+- Currency-related text
+- Denomination recognition
+The application combines multiple OCR signals when identifying Indian currency to reduce false positives.
+Ollama + Moondream
+For general visual questions, Nexus saves the current camera frame and sends it to:
+moondream:v2
+through Ollama.
+Example:
+"What is the person holding?"
+Moondream analyzes the image and generates a natural-language answer.
+Text-to-Speech
+Windows
+Nexus uses:
+pyttsx3 → Windows SAPI5
+A fresh SAPI5 engine is initialized for each spoken response to improve reliability during repeated interactions.
+macOS
+Nexus uses the macOS built-in:
+say
+command.
+Project Structure
+nexus/
+│
+├── nexus.py
+│   └── Main Nexus application
+│
+├── wake_word.py
+│   └── Standalone wake-word testing
+│
+├── question_recorder.py
+│   └── Standalone audio recording/testing
+│
+├── vqa_test.py
+│   └── Historical BLIP-VQA experiment
+│
+├── voice_vqa_test.py
+│   └── Historical voice + BLIP-VQA experiment
+│
+├── eval_test.py
+│   └── Evaluation/testing harness
+│
+├── diagnose_ollama_moondream.py
+│   └── Ollama + Moondream diagnostic test
+│
+├── requirements.txt
+│   └── Python dependencies
+│
+├── run.sh
+│   └── macOS launcher
+│
+├── run.bat
+│   └── Windows launcher
+│
+├── PROJECT_STATUS.md
+│   └── Detailed project status and development notes
+│
+├── .gitignore
+│
+└── README.md
+Runtime Flow
+A typical interaction follows this sequence:
+1. Webcam captures the environment
+              ↓
+2. YOLO continuously detects objects
+              ↓
+3. Vosk listens for "Hey Nexus"
+              ↓
+4. User says "Hey Nexus"
+              ↓
+5. Nexus responds "I'm listening"
+              ↓
+6. User asks a question
+              ↓
+7. Whisper converts speech → text
+              ↓
+8. Question router determines the required system
+              ↓
+      ┌───────┼────────┬──────────┐
+      ↓       ↓        ↓          ↓
+     OCR    Currency  YOLO     Moondream
+      │       │        │          │
+      └───────┴────────┴──────────┘
+                   ↓
+             Generated answer
+                   ↓
+                 TTS
+                   ↓
+             Spoken response
+Troubleshooting
+Ollama is not responding
+Check that Ollama is running:
+ollama list
+or on macOS:
+ollama list
+Make sure the model exists:
+moondream:v2
+If it is missing:
+ollama pull moondream:v2
+Camera is not detected
+Make sure:
+- Your webcam is connected.
+- No other application is using the webcam.
+- Camera permissions are enabled for Python/your terminal.
+Nexus currently uses the default camera:
+cv2.VideoCapture(0)
+Microphone is not working
+Check that your operating system has granted microphone access to Python/your terminal.
+You can also test the microphone using the standalone recording utilities included in the project.
+Windows TTS is not working
+Nexus uses:
+pyttsx3 + Windows SAPI5
+Make sure Windows has at least one installed speech voice.
+You can check:
+Windows Settings
+→ Accessibility
+→ Speech
+Restart Nexus after changing speech settings.
+macOS TTS is not working
+Test the built-in macOS speech system:
+say "Hello, this is Nexus"
+If this does not produce audio, the problem is with the macOS speech/audio configuration rather than Nexus.
+CPU warning
+You may see a message such as:
+Neither CUDA nor MPS are available - defaulting to CPU.
+This is not an error.
+Nexus can run on CPU, although inference may be slower.
+Known Limitations
+- Real-time performance depends on CPU/GPU hardware.
+- YOLO only detects objects supported by its trained classes.
+- Moondream's visual answers may occasionally be inaccurate.
+- Whisper may occasionally misinterpret speech, especially in noisy environments.
+- The system currently expects English voice commands.
+- Linux has not been officially tested.
+- The current system is a research/prototype project and should not be treated as a certified mobility or safety device.
+Future Improvements
+Planned improvements include:
+- Personalized object learning
+- User-confirmed object datasets
+- Custom YOLO training
+- Real-time object tracking
+- Improved obstacle detection
+- Directional navigation assistance
+- Approaching-object warnings
+- Mobile camera integration
+- Improved multilingual voice interaction
+- More robust offline operation
+- Personalized scene understanding
+Development Notes
+The project previously experimented with BLIP-VQA. That approach was abandoned in favor of:
+Ollama + Moondream
+The BLIP-related test files remain in the repository for historical comparison and experimentation, but they are not part of the production Nexus pipeline.
+The production application is:
+nexus.py
+Safety Notice
+Nexus is an experimental accessibility prototype.
+Its computer-vision and navigation-related predictions can be incorrect or delayed. It should not be relied upon as the sole source of information when navigating roads, traffic, stairs, or other hazardous environments.
+License
+This project is intended for educational and research purposes.
 
-- **Windows**: Uses `pyttsx3` with SAPI5 (included in `requirements.txt`).
-  Run with `python nexus.py` or `run.bat`.
-- **macOS**: Uses built-in `say` command (no extra install).
-  Run with `./run.sh`.
-- Both: Python 3.10+, webcam, microphone, Ollama running locally with
-  `moondream:v2` pulled.
+### One thing I deliberately changed
 
-## Note on an abandoned approach
+I included this in **Future Improvements**:
 
-Early development fine-tuned a BLIP-VQA model instead of using moondream2.
-**This was abandoned and is not part of the project being presented** --
-mentioned here only so it's not a surprise if you see BLIP-related code in
-`vqa_test.py`/`voice_vqa_test.py` or in the git history. It was dropped
-because BLIP-VQA only produces short, one-word answers by design, which
-doesn't fit an assistant meant to describe scenes in detail. See
-`PROJECT_STATUS.md` if you need the specifics of why it was tried and why
-it was dropped.
+> Personalized object learning  
+> User-confirmed object datasets  
+> Custom YOLO training  
+> Real-time object tracking  
+> Directional navigation assistance
 
-## Troubleshooting
+That's useful because those are exactly the features we're considering next, without pretending they're already implemented.
 
-- **No sound at all**: check your system volume isn't muted, and try
-  `say "test"` (macOS) in a plain terminal to confirm your OS's
-  text-to-speech works at all, independent of this app. (The app itself
-  uses this same `say` command for speech, not a Python TTS library --
-  we switched away from `pyttsx3` after confirming it could silently
-  report success while producing no audible sound at all.)
-- **Camera window is black or frozen**: check camera permission was
-  granted to your terminal app in your OS's privacy settings.
-- **"No module named X" error**: rerun `pip install -r requirements.txt`.
-- **"Can't reach the Ollama service" error**: run `brew services start
-  ollama`, and confirm the model is pulled with `ollama list` (should show
-  `moondream:v2`). If you installed Ollama after already having Python
-  packages installed, Homebrew's own Python may now shadow your original
-  `python3` -- use `./run.sh` instead of `python3 nexus.py`
-  directly, or find your original interpreter with
-  `ls /Library/Frameworks/Python.framework/Versions/*/bin/python3` and call
-  that explicitly.
-- **"Hey Nexus" stops working partway through a session**: this was a real,
-  confirmed bug (two competing microphone streams disrupting each other
-  over time) and has been fixed by moving to a single shared audio stream.
-  If it recurs, that fix should be the first thing checked.
-- **Answers come back empty, or oddly short**: moondream2 can silently
-  return nothing for certain short/direct question phrasings (confirmed by
-  testing -- e.g. "What is in my hand?" alone can fail while "Can you tell
-  me what is in my hand?" succeeds). The app rephrases short questions
-  automatically to reduce this, but it isn't foolproof for every phrasing --
-  see "Confirmed failure patterns" under Sample Interactions in
-  `PROJECT_STATUS.md` for known cases.
+Also, I would **not claim that Nexus can currently calculate vehicle speed or safely tell a person which way to walk**. Those should remain future features until we actually implement and test them.
+
+Your current checkpoint is therefore nicely positioned: **working cross-platform core first, then new accessibility features on top.**
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Thinking effortGPT-5.6 Sol
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    To pick up a draggable item, press the space bar.
+    While dragging, use the arrow keys to move the item.
+    Press space again to drop the item in its new position, or press escape to cancel.
