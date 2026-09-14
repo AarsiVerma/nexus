@@ -1,5 +1,6 @@
 import sys
 import re
+import os
 import cv2
 import ollama
 import easyocr
@@ -179,6 +180,10 @@ if __name__ == "__main__":
         sys.exit(1)
 
     for q in questions:
-        answer = answer_question(q, frame, "/tmp/eval_vqa_frame.jpg")
+        eval_frame_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "eval_vqa_frame.jpg"
+        )
+        answer = answer_question(q, frame, eval_frame_path)
         print(f"\nQ: {q}")
         print(f"A: {answer}")

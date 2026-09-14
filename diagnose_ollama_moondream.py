@@ -1,6 +1,8 @@
 import cv2
 import time
 import ollama
+import os
+import tempfile
 
 print("Capturing one frame from webcam...")
 cap = cv2.VideoCapture(0)
@@ -14,8 +16,9 @@ if not ret:
     print("FAILED to capture a frame from the webcam.")
     raise SystemExit(1)
 
-cv2.imwrite("/tmp/ollama_test_frame.jpg", frame)
-print("Frame captured, saved to /tmp/ollama_test_frame.jpg")
+frame_path = os.path.join(tempfile.gettempdir(), "ollama_test_frame.jpg")
+cv2.imwrite(frame_path, frame)
+print(f"Frame captured, saved to {frame_path}")
 
 questions = [
     "Describe everything you see in this image in detail.",
@@ -32,7 +35,7 @@ for q in questions:
         messages=[{
             "role": "user",
             "content": q,
-            "images": ["/tmp/ollama_test_frame.jpg"],
+            "images": [frame_path],
         }],
     )
     elapsed = time.time() - start

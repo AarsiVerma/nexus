@@ -151,8 +151,6 @@ qa_active = threading.Event()  # set while a wake-word question is being recorde
 
 # --- Text to speech -------------------------------------------------------
 
-# --- Text to speech -------------------------------------------------------
-
 speech_queue = queue.Queue()
 
 

@@ -8,3 +8,6 @@ __pycache__/
 blip_finetuned/
 vosk-model-small-en-us/
 yolov8n.pt
+
+# Runtime-generated frame for VQA
+nexus_frame.jpg

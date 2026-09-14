@@ -11,9 +11,7 @@ this project does and doesn't do.
 
 ## Setup (run these steps in order)
 
-**macOS only** -- these steps (and the app itself) depend on macOS-specific
-things like Homebrew and the built-in `say` command. See Requirements below
-for details. It will not work on Windows or Linux without porting.
+**Windows and macOS supported** — Windows uses pyttsx3 with SAPI5 for TTS; macOS uses the built-in `say` command. Linux is untested but should work with a TTS backend.
 
 1. **Install Python dependencies:**
    ```
@@ -109,18 +107,15 @@ for details. It will not work on Windows or Linux without porting.
 
 ## Requirements
 
-**macOS only (Apple Silicon tested) -- this will not run on Windows or
-Linux as-is.** Speech output shells out directly to macOS's built-in `say`
-command (see the TTS note in `nexus.py`), the launcher `run.sh` is a bash
-script pointing at a macOS Python install path, and the Ollama install step
-below uses Homebrew. None of that has a Windows/Linux equivalent wired up
-yet -- porting it would mean swapping in a different TTS backend, a
-non-bash launcher, and OS-appropriate install steps.
+**Windows (tested) and macOS (tested)** — Linux untested but should work
+with a TTS backend.
 
-Otherwise: Python 3.12, a webcam, and a microphone. Your OS will likely
-prompt for camera and microphone permission the first time you run it --
-allow both, or the app can't work. **This currently runs on a laptop only,
-not a phone** -- see Limitations in `PROJECT_STATUS.md`.
+- **Windows**: Uses `pyttsx3` with SAPI5 (included in `requirements.txt`).
+  Run with `python nexus.py` or `run.bat`.
+- **macOS**: Uses built-in `say` command (no extra install).
+  Run with `./run.sh`.
+- Both: Python 3.10+, webcam, microphone, Ollama running locally with
+  `moondream:v2` pulled.
 
 ## Note on an abandoned approach
 
