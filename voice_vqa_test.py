@@ -46,7 +46,7 @@ def speak(text):
     speech_queue.put(text)
 
 
-# --- Wake word ("Hey Nexus"), same setup as vision_saathi.py -------------
+# --- Wake word ("Hey Nexus"), same setup as nexus.py -------------
 WAKE_MODEL_PATH = "vosk-model-small-en-us"
 WAKE_GRAMMAR = ["hey", "nexus", "[unk]"]
 WAKE_COOLDOWN = 3

@@ -25,7 +25,7 @@ print("Checking Ollama / VQA model...")
 # Requires the Ollama background service running (`brew services start ollama`)
 # and the model pulled (`ollama pull moondream:v2`).
 VQA_MODEL = "moondream:v2"
-VQA_FRAME_PATH = "/tmp/vision_saathi_frame.jpg"
+VQA_FRAME_PATH = "/tmp/nexus_frame.jpg"
 try:
     ollama.list()
 except Exception as e:
@@ -100,6 +100,38 @@ CURRENCY_TRIGGERS = (
     'what currency', 'rupee', 'rupees',
 )
 INDIAN_DENOMINATIONS = {'10', '20', '50', '100', '200', '500', '2000'}
+
+# Text every genuine Indian note carries (English + Hindi) but an unrelated
+# object with a matching number on it (e.g. "SPF 50") won't -- used as a
+# second signal in identify_currency() below to cut false positives.
+CURRENCY_KEYWORDS = ('reserve bank', 'rbi', 'भारतीय रिज़र्व बैंक', 'रिज़र्व बैंक')
+
+# Every Indian note also prints its amount spelled out in words (Hindi and
+# English), e.g. "पाँच सौ रुपये" / "FIVE HUNDRED RUPEES" on a 500 note --
+# confirmed by testing that OCR sometimes catches this instead of (or as
+# well as) the plain numeral. Each entry lists token sets (both spelling
+# variants where relevant); all tokens in a set must appear in the same
+# OCR'd fragment to count as a match for that denomination.
+DENOMINATION_WORD_TOKENS = {
+    '10': [['दस'], ['ten', 'rupees']],
+    '20': [['बीस'], ['twenty', 'rupees']],
+    '50': [['पचास'], ['fifty', 'rupees']],
+    '100': [['एक', 'सौ'], ['one', 'hundred']],
+    '200': [['दो', 'सौ'], ['two', 'hundred']],
+    '500': [['पाँच', 'सौ'], ['पांच', 'सौ'], ['five', 'hundred']],
+    '2000': [['दो', 'हज़ार'], ['दो', 'हजार'], ['two', 'thousand']],
+}
+
+
+def _word_form_denomination(kept):
+    # Lowercased for the English tokens above -- .lower() is a no-op on
+    # Devanagari, so the Hindi tokens still match unaffected.
+    for text in kept:
+        text_lower = text.lower()
+        for digits, token_sets in DENOMINATION_WORD_TOKENS.items():
+            if any(all(tok in text_lower for tok in tokens) for tokens in token_sets):
+                return digits
+    return None
 
 AUTO_ALERTS_ENABLED = False  # set True to re-enable automatic "Person ahead" style alerts
 
@@ -315,13 +347,40 @@ def identify_currency():
     if not kept:
         return "I couldn't find a currency note clearly in view."
 
+    has_bank_text = any(
+        keyword in " ".join(kept).lower() for keyword in CURRENCY_KEYWORDS
+    )
+
     # Indian notes print the denomination as a plain number in multiple
-    # spots -- look for OCR'd text that's just that number (allowing for
-    # stray OCR noise like a stray character stuck to a digit).
+    # spots (both corners, the numeral panel, the watermark window) --
+    # count how many OCR fragments matched each denomination, since an
+    # unrelated object with one matching number on it (confirmed by
+    # testing: a sunscreen box's "SPF 50") should only ever produce one hit.
+    digit_hits = {}
     for text in kept:
         digits = re.sub(r'[^0-9]', '', text)
         if digits in INDIAN_DENOMINATIONS:
+            digit_hits[digits] = digit_hits.get(digits, 0) + 1
+
+    for digits, count in digit_hits.items():
+        # Either signal alone is enough: bank text confirms it's a real note
+        # even if only one instance of the number is legible, and 2+
+        # instances of the number is strong evidence even without bank text.
+        if has_bank_text or count >= 2:
             return f"This looks like a {digits} rupee note."
+
+    # The amount spelled out in words (Hindi/English) is on its own strong
+    # enough evidence -- an unrelated object saying "पाँच सौ रुपये" by
+    # coincidence isn't realistic -- so it doesn't need a numeral to back it
+    # up, unlike the single-numeral case above.
+    word_digits = _word_form_denomination(kept)
+    if word_digits:
+        return f"This looks like a {word_digits} rupee note."
+
+    if digit_hits:
+        return ("I can see a number that could be a denomination, but "
+                "nothing else about it looks like currency -- this might "
+                "not actually be a note.")
 
     # Found text (probably bank name, promise-to-pay line, etc.) but no
     # recognizable denomination number -- read what we did find rather than
@@ -353,7 +412,13 @@ def answer_question(question):
     if any(trigger in q for trigger in READ_TRIGGERS):
         return read_text_aloud()
 
-    if q.startswith(("how many", "count")):
+    # Was `q.startswith(("how many", "count"))` -- too brittle for real
+    # spoken phrasing, which rarely opens with the trigger word ("please
+    # count...", "...and count them?", "describe the number of..."),
+    # confirmed by testing to silently fall through to moondream (bad at
+    # counting) instead of YOLO. Match the whole phrase anywhere in the
+    # question instead.
+    if re.search(r'\bcount\b|\bhow many\b|\bnumber of\b', q):
         count_answer = count_known_objects(q)
         if count_answer is not None:
             return count_answer

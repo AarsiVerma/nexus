@@ -11,6 +11,10 @@ this project does and doesn't do.
 
 ## Setup (run these steps in order)
 
+**macOS only** -- these steps (and the app itself) depend on macOS-specific
+things like Homebrew and the built-in `say` command. See Requirements below
+for details. It will not work on Windows or Linux without porting.
+
 1. **Install Python dependencies:**
    ```
    pip install -r requirements.txt
@@ -21,7 +25,7 @@ this project does and doesn't do.
    - Download the **vosk-model-small-en-us** package
    - Unzip it and place the resulting folder in this same directory, named
      exactly `vosk-model-small-en-us` (so `vosk-model-small-en-us/` sits next
-     to `vision_saathi.py`)
+     to `nexus.py`)
 
 3. **Install and start Ollama** (runs the question-answering model locally):
    ```
@@ -64,13 +68,17 @@ this project does and doesn't do.
   answered via EasyOCR (English + Hindi), not the vision-language model,
   since a general VLM isn't reliable at precisely transcribing text.
 - **Indian currency identification** ("how much is this," "what note is
-  this") -- also OCR-based: looks for a number matching a real Indian
-  denomination (10/20/50/100/200/500/2000) among the recognized text.
-  **Known limitation**: this can false-positive on any object with a
-  matching number printed on it for an unrelated reason (confirmed by
-  testing -- a sunscreen box with "SPF 50" on it was misidentified as a
-  50 rupee note). It also depends on the denomination numeral being
-  clearly, fully in frame.
+  this") -- also OCR-based: accepts a denomination match (10/20/50/100/
+  200/500/2000) only when backed by more than a single bare number, to
+  avoid misreading an unrelated object as a note (originally confirmed by
+  testing: a sunscreen box's "SPF 50" was misidentified as a 50 rupee
+  note). It looks for any of three signals: the number printed more than
+  once (real notes print it in multiple spots), bank text ("RESERVE BANK
+  OF INDIA" / भारतीय रिज़र्व बैंक), or the amount spelled out in words in
+  Hindi or English (e.g. "पाँच सौ रुपये" / "FIVE HUNDRED RUPEES"). **Known
+  limitation**: still depends on OCR actually catching one of those
+  signals clearly in frame, and a contrived object carrying two matching
+  numbers or real bank-style text could still fool it.
 
 ## Other scripts
 
@@ -89,20 +97,30 @@ this project does and doesn't do.
 - `diagnose_ollama_moondream.py` -- standalone test of the moondream2/Ollama
   Q&A path alone (captures one webcam frame, asks it a fixed set of sample
   questions, prints the answers), no mic/wake-word/camera-loop involved.
-- `eval_test.py` -- the evaluation harness used to produce the accuracy
-  numbers in `PROJECT_STATUS.md`. Mirrors `vision_saathi.py`'s actual
-  routing logic (kept in sync by hand, not imported, since importing the
-  main file would start its live camera loop) against a saved test image
+- `eval_test.py` -- an evaluation harness for testing question routing
+  against saved photos instead of the live camera (no scored benchmark is
+  currently published from it -- see "Sample interactions" in
+  `PROJECT_STATUS.md` for real question/answer examples instead). Mirrors
+  `nexus.py`'s actual routing logic (kept in sync by hand, not imported,
+  since importing the main file would start its live camera loop) against
+  a saved test image
   and a list of questions passed on the command line. Usage:
   `python3 eval_test.py <image_path> "question 1" "question 2" ...`
 
 ## Requirements
 
-Python 3.12, a webcam, and a microphone. Developed and tested on macOS
-(Apple Silicon). Your OS will likely prompt for camera and microphone
-permission the first time you run it -- allow both, or the app can't work.
-**This currently runs on a laptop only, not a phone** -- see Limitations in
-`PROJECT_STATUS.md`.
+**macOS only (Apple Silicon tested) -- this will not run on Windows or
+Linux as-is.** Speech output shells out directly to macOS's built-in `say`
+command (see the TTS note in `nexus.py`), the launcher `run.sh` is a bash
+script pointing at a macOS Python install path, and the Ollama install step
+below uses Homebrew. None of that has a Windows/Linux equivalent wired up
+yet -- porting it would mean swapping in a different TTS backend, a
+non-bash launcher, and OS-appropriate install steps.
+
+Otherwise: Python 3.12, a webcam, and a microphone. Your OS will likely
+prompt for camera and microphone permission the first time you run it --
+allow both, or the app can't work. **This currently runs on a laptop only,
+not a phone** -- see Limitations in `PROJECT_STATUS.md`.
 
 ## Note on an abandoned approach
 
@@ -130,7 +148,7 @@ it was dropped.
   ollama`, and confirm the model is pulled with `ollama list` (should show
   `moondream:v2`). If you installed Ollama after already having Python
   packages installed, Homebrew's own Python may now shadow your original
-  `python3` -- use `./run.sh` instead of `python3 vision_saathi.py`
+  `python3` -- use `./run.sh` instead of `python3 nexus.py`
   directly, or find your original interpreter with
   `ls /Library/Frameworks/Python.framework/Versions/*/bin/python3` and call
   that explicitly.
@@ -143,5 +161,5 @@ it was dropped.
   testing -- e.g. "What is in my hand?" alone can fail while "Can you tell
   me what is in my hand?" succeeds). The app rephrases short questions
   automatically to reduce this, but it isn't foolproof for every phrasing --
-  see the accuracy breakdown in `PROJECT_STATUS.md` for how often this
-  actually happens.
+  see "Confirmed failure patterns" under Sample Interactions in
+  `PROJECT_STATUS.md` for known cases.
